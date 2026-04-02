@@ -31,10 +31,6 @@
     dripAlpha:        0.72,
   };
 
-  // Capture embed container reference immediately (document.currentScript is
-  // only live during synchronous script execution, not inside callbacks)
-  var _embedEl = document.currentScript && document.currentScript.parentElement;
-
   // ─── State ─────────────────────────────────────────────────────────────────
   var canvas, ctx;
   var W, H;
@@ -54,14 +50,6 @@
 
   // ─── Setup canvas ──────────────────────────────────────────────────────────
   function init() {
-    // Make the Framer Embed container transparent to pointer events so that
-    // Framer links/buttons still receive clicks while our document listeners
-    // catch everything for spraying.
-    // Collapse and neutralise the embed container so it's invisible and takes no space
-    if (_embedEl) {
-      _embedEl.style.cssText += ';pointer-events:none!important;width:0!important;height:0!important;overflow:hidden!important;position:absolute!important;';
-    }
-
     canvas = document.createElement('canvas');
     canvas.id = 'spray-paint-canvas';
     var s = canvas.style;
