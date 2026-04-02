@@ -50,6 +50,12 @@
 
   // ─── Setup canvas ──────────────────────────────────────────────────────────
   function init() {
+    // Make the Framer Embed container transparent to pointer events so that
+    // Framer links/buttons still receive clicks while our document listeners
+    // catch everything for spraying.
+    var embedEl = document.currentScript && document.currentScript.parentElement;
+    if (embedEl) embedEl.style.pointerEvents = 'none';
+
     canvas = document.createElement('canvas');
     canvas.id = 'spray-paint-canvas';
     var s = canvas.style;
