@@ -3,8 +3,8 @@
 
   // ─── Config ────────────────────────────────────────────────────────────────
   var CFG = {
-    baseRate:         30,
-    maxRate:          80,
+    baseRate:         75,
+    maxRate:          200,
     baseRadius:       36,
     dripDelay:        1500,
     maxDrips:         3,
@@ -17,7 +17,7 @@
     dripDrift:        0.015,
     dripFriction:     0.994,
     dripMaxLen:       220,
-    dripWidth:        5.5,
+    dripWidth:        22,
     dripAlpha:        0.80,
   };
 
@@ -163,7 +163,7 @@
   function onDown(e) {
     pressing = true;
     dripsThisHold = 0;
-    holdDensity = 0.6;  // start dense immediately
+    holdDensity = 1.0;  // start at full density immediately
     colorIdx = (colorIdx + 1) % COLORS.length;
     setPos(e.clientX, e.clientY);
     prevMouse.x = mouse.x;
@@ -185,7 +185,7 @@
     if (!e.touches.length) return;
     pressing = true;
     dripsThisHold = 0;
-    holdDensity = 0.6;  // start dense immediately
+    holdDensity = 1.0;  // start at full density immediately
     colorIdx = (colorIdx + 1) % COLORS.length;
     setPos(e.touches[0].clientX, e.touches[0].clientY);
     prevMouse.x = mouse.x;
