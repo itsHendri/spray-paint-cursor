@@ -62,20 +62,22 @@
     s.pointerEvents = 'none';
     s.display    = 'block';
 
-    // Insert as first child of body so it sits behind everything
+    // Insert as first child of body
     document.body.insertBefore(canvas, document.body.firstChild);
+
+    // Lift all other body children above the canvas so content stays on top
+    var st = document.createElement('style');
+    st.textContent = 'body > *:not(#spray-paint-canvas){position:relative;z-index:1;}';
+    document.head.appendChild(st);
 
     ctx = canvas.getContext('2d');
     resize();
     window.addEventListener('resize', resize);
 
-    // Use capture:true so events are caught before Framer/React handlers can stop propagation
-    // Mouse
     document.addEventListener('mousedown', onDown,  { capture: true });
     document.addEventListener('mouseup',   onUp,    { capture: true });
     document.addEventListener('mousemove', onMove,  { capture: true });
 
-    // Touch
     document.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
     document.addEventListener('touchend',   onTouchEnd,   { passive: true, capture: true });
     document.addEventListener('touchmove',  onTouchMove,  { passive: true, capture: true });
