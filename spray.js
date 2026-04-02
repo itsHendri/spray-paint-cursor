@@ -69,15 +69,16 @@
     resize();
     window.addEventListener('resize', resize);
 
+    // Use capture:true so events are caught before Framer/React handlers can stop propagation
     // Mouse
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('mouseup',   onUp);
-    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mousedown', onDown,  { capture: true });
+    document.addEventListener('mouseup',   onUp,    { capture: true });
+    document.addEventListener('mousemove', onMove,  { capture: true });
 
     // Touch
-    document.addEventListener('touchstart', onTouchStart, { passive: true });
-    document.addEventListener('touchend',   onTouchEnd,   { passive: true });
-    document.addEventListener('touchmove',  onTouchMove,  { passive: true });
+    document.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+    document.addEventListener('touchend',   onTouchEnd,   { passive: true, capture: true });
+    document.addEventListener('touchmove',  onTouchMove,  { passive: true, capture: true });
 
     loop();
   }
