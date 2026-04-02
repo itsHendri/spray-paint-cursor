@@ -4,26 +4,26 @@
   // ─── Config ────────────────────────────────────────────────────────────────
   var CFG = {
     color:            '#574CFF',
-    baseRate:         12,
-    maxRate:          40,
-    baseRadius:       28,
+    // Denser spray — more particles, finer dots, stronger centre weighting
+    baseRate:         30,
+    maxRate:          80,
+    baseRadius:       36,
     dripDelay:        1500,
     maxDrips:         3,
-    minDot:           1.2,
-    maxDot:           3.2,
-    speedSpread:      0.35,
+    minDot:           0.6,
+    maxDot:           2.4,
+    speedSpread:      0.4,
     minAlpha:         0.55,
-    maxAlpha:         0.92,
+    maxAlpha:         0.95,
+    // Drip physics
     dripGravity:      0.06,
     dripDrift:        0.015,
     dripFriction:     0.994,
     dripMaxLen:       220,
-    dripWidth:        2.8,
-    dripAlpha:        0.72,
+    dripWidth:        5.5,   // thicker drip line
+    dripAlpha:        0.80,
   };
 
-  // Capture script reference now — document.currentScript is only live
-  // during synchronous execution, before any callbacks fire.
   var _scriptEl = document.currentScript;
 
   // ─── State ─────────────────────────────────────────────────────────────────
@@ -40,13 +40,67 @@
   var drips       = [];
   var holdDensity = 0;
 
+  // ─── Audio ─────────────────────────────────────────────────────────────────
+  var audioCtx    = null;
+  var noiseSource = null;
+  var noiseGain   = null;
+
+  function startSound() {
+    try {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (noiseSource) return; // already playing
+
+      // Two seconds of white noise, looped
+      var sr  = audioCtx.sampleRate;
+      var buf = audioCtx.createBuffer(1, sr * 2, sr);
+      var dat = buf.getChannelData(0);
+      for (var i = 0; i < dat.length; i++) dat[i] = Math.random() * 2 - 1;
+
+      noiseSource = audioCtx.createBufferSource();
+      noiseSource.buffer = buf;
+      noiseSource.loop   = true;
+
+      // Bandpass centred on ~5 kHz — aerosol hiss
+      var bp = audioCtx.createBiquadFilter();
+      bp.type            = 'bandpass';
+      bp.frequency.value = 5000;
+      bp.Q.value         = 0.7;
+
+      // Soft high-shelf boost to brighten
+      var shelf = audioCtx.createBiquadFilter();
+      shelf.type            = 'highshelf';
+      shelf.frequency.value = 3000;
+      shelf.gain.value      = 6;
+
+      noiseGain = audioCtx.createGain();
+      noiseGain.gain.setValueAtTime(0, audioCtx.currentTime);
+      noiseGain.gain.linearRampToValueAtTime(0.18, audioCtx.currentTime + 0.06);
+
+      noiseSource.connect(bp);
+      bp.connect(shelf);
+      shelf.connect(noiseGain);
+      noiseGain.connect(audioCtx.destination);
+      noiseSource.start();
+    } catch (e) { /* audio blocked — silently ignore */ }
+  }
+
+  function stopSound() {
+    try {
+      if (noiseGain && audioCtx) {
+        noiseGain.gain.setValueAtTime(noiseGain.gain.value, audioCtx.currentTime);
+        noiseGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.08);
+      }
+      var src = noiseSource;
+      noiseSource = null;
+      if (src) setTimeout(function () { try { src.stop(); } catch (e) {} }, 120);
+    } catch (e) {}
+  }
+
   // ─── Setup ─────────────────────────────────────────────────────────────────
   function init() {
-
-    // 1. Neutralise the Framer Embed container chain so it never blocks clicks.
-    //    Traverse from the script tag up to (and including) the first
-    //    absolute/fixed ancestor — that's the embed frame itself.
-    //    Everything above that (Framer's page root, nav, etc.) is untouched.
     var el = _scriptEl ? _scriptEl.parentElement : null;
     while (el && el !== document.body) {
       el.style.pointerEvents = 'none';
@@ -55,15 +109,12 @@
       el = el.parentElement;
     }
 
-    // 2. Move body's background colour to <html> so that a canvas sitting at
-    //    z-index:-1 (below body) is still visible against the page colour.
     var bodyBg = window.getComputedStyle(document.body).backgroundColor;
     if (bodyBg && bodyBg !== 'rgba(0, 0, 0, 0)' && bodyBg !== 'transparent') {
       document.documentElement.style.backgroundColor = bodyBg;
       document.body.style.backgroundColor = 'transparent';
     }
 
-    // 3. Create canvas truly behind all page content (z-index: -1).
     canvas = document.createElement('canvas');
     canvas.id = 'spray-paint-canvas';
     var s = canvas.style;
@@ -82,9 +133,9 @@
     resize();
     window.addEventListener('resize', resize);
 
-    document.addEventListener('mousedown', onDown,  { capture: true });
-    document.addEventListener('mouseup',   onUp,    { capture: true });
-    document.addEventListener('mousemove', onMove,  { capture: true });
+    document.addEventListener('mousedown',  onDown,       { capture: true });
+    document.addEventListener('mouseup',    onUp,         { capture: true });
+    document.addEventListener('mousemove',  onMove,       { capture: true });
     document.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
     document.addEventListener('touchend',   onTouchEnd,   { passive: true, capture: true });
     document.addEventListener('touchmove',  onTouchMove,  { passive: true, capture: true });
@@ -106,12 +157,14 @@
     prevMouse.x = mouse.x;
     prevMouse.y = mouse.y;
     scheduleStillCheck();
+    startSound();
   }
 
   function onUp() {
     pressing = false;
     holdDensity = 0;
     clearStillTimer();
+    stopSound();
   }
 
   function onMove(e) { setPos(e.clientX, e.clientY); }
@@ -125,12 +178,14 @@
     prevMouse.x = mouse.x;
     prevMouse.y = mouse.y;
     scheduleStillCheck();
+    startSound();
   }
 
   function onTouchEnd() {
     pressing = false;
     holdDensity = 0;
     clearStillTimer();
+    stopSound();
   }
 
   function onTouchMove(e) {
@@ -196,7 +251,8 @@
     var radius = CFG.baseRadius + speed * CFG.speedSpread;
     for (var i = 0; i < count; i++) {
       var angle = Math.random() * Math.PI * 2;
-      var dist  = Math.pow(Math.random(), 0.65) * radius;
+      // Stronger centre weighting (power 0.45 vs 0.65) → denser core like reference
+      var dist  = Math.pow(Math.random(), 0.45) * radius;
       particles.push({
         x: mouse.x + Math.cos(angle) * dist,
         y: mouse.y + Math.sin(angle) * dist,
