@@ -13,12 +13,13 @@
     speedSpread:      0.4,
     minAlpha:         0.55,
     maxAlpha:         0.95,
-    dripGravity:      0.06,
-    dripDrift:        0.015,
-    dripFriction:     0.994,
-    dripMaxLen:       220,
-    dripWidth:        22,
-    dripAlpha:        0.80,
+    dripGravity:      0.14,   // strong enough to pull naturally
+    dripDrift:        0.008,  // slight sideways wobble
+    dripFriction:     0.980,  // lets it accelerate freely
+    dripMaxLen:       260,
+    dripHeadWidth:    14,     // thick at the pooling head
+    dripTailWidth:    2,      // thins to a fine tail
+    dripAlpha:        0.88,
   };
 
   // Alternating colours: #383BFE (blue) and #EF2006 (red)
@@ -238,15 +239,15 @@
   function spawnDrip() {
     dripsThisHold++;
     drips.push({
-      x: mouse.x + (Math.random() - 0.5) * CFG.baseRadius * 0.6,
+      x: mouse.x + (Math.random() - 0.5) * CFG.baseRadius * 0.5,
       y: mouse.y,
-      vy: CFG.dripGravity,
-      vx: (Math.random() - 0.5) * 0.4,
+      vy: 0,   // starts stationary — gravity builds flow naturally
+      vx: 0,
       len: 0,
-      maxLen: CFG.dripMaxLen * (0.5 + Math.random() * 0.5),
+      maxLen: CFG.dripMaxLen * (0.6 + Math.random() * 0.4),
       segments: [],
       alive: true,
-      colorIdx: colorIdx,   // inherit current colour at spawn time
+      colorIdx: colorIdx,
     });
     if (dripsThisHold < CFG.maxDrips) {
       stillTimer = setTimeout(function () {
@@ -282,10 +283,10 @@
       var d = drips[i];
       if (!d.alive) { drips.splice(i, 1); continue; }
       d.segments.push({ x: d.x, y: d.y });
-      d.vx += (Math.random() - 0.5) * CFG.dripDrift;
-      d.vx *= CFG.dripFriction;
-      d.vy += CFG.dripGravity * 0.05;
-      d.vy *= CFG.dripFriction;
+      // Gravity accumulates each frame — slow start, natural acceleration
+      d.vy  = (d.vy + CFG.dripGravity) * CFG.dripFriction;
+      // Slight lateral wobble, dampened
+      d.vx  = (d.vx + (Math.random() - 0.5) * CFG.dripDrift) * CFG.dripFriction;
       d.x  += d.vx;
       d.y  += d.vy;
       d.len++;
@@ -306,17 +307,33 @@
 
     for (var j = 0; j < drips.length; j++) {
       var d = drips[j];
-      if (d.segments.length < 2) continue;
-      ctx.beginPath();
-      ctx.moveTo(d.segments[0].x, d.segments[0].y);
-      for (var k = 1; k < d.segments.length; k++)
-        ctx.lineTo(d.segments[k].x, d.segments[k].y);
-      var fa = d.alive ? CFG.dripAlpha : CFG.dripAlpha * (1 - d.len / d.maxLen);
-      ctx.strokeStyle = rgba(Math.max(0, fa), d.colorIdx);
-      ctx.lineWidth   = CFG.dripWidth * (0.6 + 0.4 * (1 - d.len / d.maxLen));
-      ctx.lineCap     = 'round';
-      ctx.lineJoin    = 'round';
-      ctx.stroke();
+      var n = d.segments.length;
+      if (n < 2) continue;
+
+      // Draw each segment with a width that tapers from head → tail
+      ctx.lineCap  = 'round';
+      ctx.lineJoin = 'round';
+      for (var k = 1; k < n; k++) {
+        var t = k / n;  // 0 = head (thick), 1 = tail (thin)
+        var w = CFG.dripHeadWidth * (1 - t) + CFG.dripTailWidth * t;
+        var fa = CFG.dripAlpha * (d.alive ? 1 : (1 - d.len / d.maxLen));
+        ctx.beginPath();
+        ctx.moveTo(d.segments[k - 1].x, d.segments[k - 1].y);
+        ctx.lineTo(d.segments[k].x,     d.segments[k].y);
+        ctx.lineWidth   = Math.max(0.5, w);
+        ctx.strokeStyle = rgba(Math.max(0, fa), d.colorIdx);
+        ctx.stroke();
+      }
+
+      // Round bead at the live tip — shrinks as the drip lengthens
+      if (d.alive && n > 1) {
+        var progress = n / d.maxLen;
+        var beadR = CFG.dripHeadWidth * 0.55 * (1 - progress * 0.5);
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, Math.max(1, beadR), 0, Math.PI * 2);
+        ctx.fillStyle = rgba(CFG.dripAlpha, d.colorIdx);
+        ctx.fill();
+      }
     }
   }
 
