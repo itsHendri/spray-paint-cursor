@@ -3,8 +3,6 @@
 
   // ─── Config ────────────────────────────────────────────────────────────────
   var CFG = {
-    color:            '#574CFF',
-    // Denser spray — more particles, finer dots, stronger centre weighting
     baseRate:         30,
     maxRate:          80,
     baseRadius:       36,
@@ -15,30 +13,33 @@
     speedSpread:      0.4,
     minAlpha:         0.55,
     maxAlpha:         0.95,
-    // Drip physics
     dripGravity:      0.06,
     dripDrift:        0.015,
     dripFriction:     0.994,
     dripMaxLen:       220,
-    dripWidth:        5.5,   // thicker drip line
+    dripWidth:        5.5,
     dripAlpha:        0.80,
   };
+
+  // Alternating colours: #383BFE (blue) and #EF2006 (red)
+  var COLORS   = [[56,59,254], [239,32,6]];
+  var colorIdx = -1; // incremented to 0 on first press
 
   var _scriptEl = document.currentScript;
 
   // ─── State ─────────────────────────────────────────────────────────────────
   var canvas, ctx;
   var W, H;
-  var pressing    = false;
-  var mouse       = { x: 0, y: 0 };
-  var prevMouse   = { x: 0, y: 0 };
-  var speed       = 0;
-  var stillTimer  = null;
-  var stillSince  = null;
+  var pressing      = false;
+  var mouse         = { x: 0, y: 0 };
+  var prevMouse     = { x: 0, y: 0 };
+  var speed         = 0;
+  var stillTimer    = null;
+  var stillSince    = null;
   var dripsThisHold = 0;
-  var particles   = [];
-  var drips       = [];
-  var holdDensity = 0;
+  var particles     = [];
+  var drips         = [];
+  var holdDensity   = 0;
 
   // ─── Audio ─────────────────────────────────────────────────────────────────
   var audioCtx    = null;
@@ -51,9 +52,8 @@
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       }
       if (audioCtx.state === 'suspended') audioCtx.resume();
-      if (noiseSource) return; // already playing
+      if (noiseSource) return;
 
-      // Two seconds of white noise, looped
       var sr  = audioCtx.sampleRate;
       var buf = audioCtx.createBuffer(1, sr * 2, sr);
       var dat = buf.getChannelData(0);
@@ -63,25 +63,35 @@
       noiseSource.buffer = buf;
       noiseSource.loop   = true;
 
-      // Bandpass centred on ~5 kHz — aerosol hiss
+      // Narrow bandpass centred at 2200 Hz — soft, whispery aerosol hiss
       var bp = audioCtx.createBiquadFilter();
       bp.type            = 'bandpass';
-      bp.frequency.value = 5000;
-      bp.Q.value         = 0.7;
+      bp.frequency.value = 2200;
+      bp.Q.value         = 1.2;
 
-      // Soft high-shelf boost to brighten
-      var shelf = audioCtx.createBiquadFilter();
-      shelf.type            = 'highshelf';
-      shelf.frequency.value = 3000;
-      shelf.gain.value      = 6;
+      // Low-shelf cut: remove bassy rumble below 300 Hz
+      var ls = audioCtx.createBiquadFilter();
+      ls.type            = 'lowshelf';
+      ls.frequency.value = 300;
+      ls.gain.value      = -18;
+
+      // Short delay for soft spatial shimmer (ASMR tail)
+      var delay    = audioCtx.createDelay(0.1);
+      delay.delayTime.value = 0.04;
+      var feedback = audioCtx.createGain();
+      feedback.gain.value = 0.28;
+      delay.connect(feedback);
+      feedback.connect(delay);
 
       noiseGain = audioCtx.createGain();
       noiseGain.gain.setValueAtTime(0, audioCtx.currentTime);
-      noiseGain.gain.linearRampToValueAtTime(0.18, audioCtx.currentTime + 0.06);
+      noiseGain.gain.linearRampToValueAtTime(0.07, audioCtx.currentTime + 0.25);
 
       noiseSource.connect(bp);
-      bp.connect(shelf);
-      shelf.connect(noiseGain);
+      bp.connect(ls);
+      ls.connect(noiseGain);
+      ls.connect(delay);          // wet path
+      delay.connect(noiseGain);
       noiseGain.connect(audioCtx.destination);
       noiseSource.start();
     } catch (e) { /* audio blocked — silently ignore */ }
@@ -91,11 +101,11 @@
     try {
       if (noiseGain && audioCtx) {
         noiseGain.gain.setValueAtTime(noiseGain.gain.value, audioCtx.currentTime);
-        noiseGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.08);
+        noiseGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.20);
       }
       var src = noiseSource;
       noiseSource = null;
-      if (src) setTimeout(function () { try { src.stop(); } catch (e) {} }, 120);
+      if (src) setTimeout(function () { try { src.stop(); } catch (e) {} }, 250);
     } catch (e) {}
   }
 
@@ -123,9 +133,10 @@
     s.left          = '0';
     s.width         = '100%';
     s.height        = '100%';
-    s.zIndex        = '-1';
+    s.zIndex        = '1';            // above page content
     s.pointerEvents = 'none';
     s.display       = 'block';
+    s.mixBlendMode  = 'multiply';     // CSS multiply blend with page below
 
     document.body.insertBefore(canvas, document.body.firstChild);
 
@@ -152,7 +163,8 @@
   function onDown(e) {
     pressing = true;
     dripsThisHold = 0;
-    holdDensity = 0;
+    holdDensity = 0.6;  // start dense immediately
+    colorIdx = (colorIdx + 1) % COLORS.length;
     setPos(e.clientX, e.clientY);
     prevMouse.x = mouse.x;
     prevMouse.y = mouse.y;
@@ -173,7 +185,8 @@
     if (!e.touches.length) return;
     pressing = true;
     dripsThisHold = 0;
-    holdDensity = 0;
+    holdDensity = 0.6;  // start dense immediately
+    colorIdx = (colorIdx + 1) % COLORS.length;
     setPos(e.touches[0].clientX, e.touches[0].clientY);
     prevMouse.x = mouse.x;
     prevMouse.y = mouse.y;
@@ -233,6 +246,7 @@
       maxLen: CFG.dripMaxLen * (0.5 + Math.random() * 0.5),
       segments: [],
       alive: true,
+      colorIdx: colorIdx,   // inherit current colour at spawn time
     });
     if (dripsThisHold < CFG.maxDrips) {
       stillTimer = setTimeout(function () {
@@ -251,13 +265,13 @@
     var radius = CFG.baseRadius + speed * CFG.speedSpread;
     for (var i = 0; i < count; i++) {
       var angle = Math.random() * Math.PI * 2;
-      // Stronger centre weighting (power 0.45 vs 0.65) → denser core like reference
       var dist  = Math.pow(Math.random(), 0.45) * radius;
       particles.push({
         x: mouse.x + Math.cos(angle) * dist,
         y: mouse.y + Math.sin(angle) * dist,
         r: CFG.minDot + Math.random() * (CFG.maxDot - CFG.minDot),
         a: CFG.minAlpha + Math.random() * (CFG.maxAlpha - CFG.minAlpha),
+        c: colorIdx,
       });
     }
   }
@@ -285,7 +299,7 @@
       var p = particles[i];
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = rgba(p.a);
+      ctx.fillStyle = rgba(p.a, p.c);
       ctx.fill();
     }
     particles = [];
@@ -298,7 +312,7 @@
       for (var k = 1; k < d.segments.length; k++)
         ctx.lineTo(d.segments[k].x, d.segments[k].y);
       var fa = d.alive ? CFG.dripAlpha : CFG.dripAlpha * (1 - d.len / d.maxLen);
-      ctx.strokeStyle = rgba(Math.max(0, fa));
+      ctx.strokeStyle = rgba(Math.max(0, fa), d.colorIdx);
       ctx.lineWidth   = CFG.dripWidth * (0.6 + 0.4 * (1 - d.len / d.maxLen));
       ctx.lineCap     = 'round';
       ctx.lineJoin    = 'round';
@@ -313,8 +327,9 @@
     requestAnimationFrame(loop);
   }
 
-  function rgba(a) {
-    return 'rgba(87,76,255,' + a.toFixed(3) + ')';
+  function rgba(a, ci) {
+    var c = COLORS[ci !== undefined ? ci : colorIdx];
+    return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a.toFixed(3) + ')';
   }
 
   // ─── Boot ──────────────────────────────────────────────────────────────────
