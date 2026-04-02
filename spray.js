@@ -4,71 +4,79 @@
   // ─── Config ────────────────────────────────────────────────────────────────
   var CFG = {
     color:            '#574CFF',
-    // Particles per frame while spraying
     baseRate:         12,
-    // Max extra particles when holding still (density buildup)
     maxRate:          40,
-    // Radius of the spray cone (px)
     baseRadius:       28,
-    // Milliseconds until drips begin forming
     dripDelay:        1500,
-    // Max drips per single press-and-hold
     maxDrips:         3,
-    // Particle size range (px)
     minDot:           1.2,
     maxDot:           3.2,
-    // Speed-sensitive spread multiplier (higher = wider cone when moving fast)
     speedSpread:      0.35,
-    // Opacity range for each particle
     minAlpha:         0.55,
     maxAlpha:         0.92,
-    // Drip physics
     dripGravity:      0.06,
-    dripDrift:        0.015,   // horizontal wobble per frame
+    dripDrift:        0.015,
     dripFriction:     0.994,
     dripMaxLen:       220,
     dripWidth:        2.8,
     dripAlpha:        0.72,
   };
 
+  // Capture script reference now — document.currentScript is only live
+  // during synchronous execution, before any callbacks fire.
+  var _scriptEl = document.currentScript;
+
   // ─── State ─────────────────────────────────────────────────────────────────
   var canvas, ctx;
   var W, H;
-  var pressing   = false;
-  var mouse      = { x: 0, y: 0 };
-  var prevMouse  = { x: 0, y: 0 };
-  var speed      = 0;
-  var stillTimer = null;       // setTimeout handle for drip trigger
-  var stillSince = null;       // timestamp when mouse stopped moving
+  var pressing    = false;
+  var mouse       = { x: 0, y: 0 };
+  var prevMouse   = { x: 0, y: 0 };
+  var speed       = 0;
+  var stillTimer  = null;
+  var stillSince  = null;
   var dripsThisHold = 0;
-  var particles  = [];         // { x, y, r, a }  — painted dots (static)
-  var drips      = [];         // active running drips
-  var raf        = null;
-  var lastX      = null;
-  var lastY      = null;
-  var holdDensity = 0;         // 0-1 buildup when holding still
+  var particles   = [];
+  var drips       = [];
+  var holdDensity = 0;
 
-  // ─── Setup canvas ──────────────────────────────────────────────────────────
+  // ─── Setup ─────────────────────────────────────────────────────────────────
   function init() {
+
+    // 1. Neutralise the Framer Embed container chain so it never blocks clicks.
+    //    Traverse from the script tag up to (and including) the first
+    //    absolute/fixed ancestor — that's the embed frame itself.
+    //    Everything above that (Framer's page root, nav, etc.) is untouched.
+    var el = _scriptEl ? _scriptEl.parentElement : null;
+    while (el && el !== document.body) {
+      el.style.pointerEvents = 'none';
+      var pos = window.getComputedStyle(el).position;
+      if (pos === 'absolute' || pos === 'fixed') break;
+      el = el.parentElement;
+    }
+
+    // 2. Move body's background colour to <html> so that a canvas sitting at
+    //    z-index:-1 (below body) is still visible against the page colour.
+    var bodyBg = window.getComputedStyle(document.body).backgroundColor;
+    if (bodyBg && bodyBg !== 'rgba(0, 0, 0, 0)' && bodyBg !== 'transparent') {
+      document.documentElement.style.backgroundColor = bodyBg;
+      document.body.style.backgroundColor = 'transparent';
+    }
+
+    // 3. Create canvas truly behind all page content (z-index: -1).
     canvas = document.createElement('canvas');
     canvas.id = 'spray-paint-canvas';
     var s = canvas.style;
-    s.position   = 'fixed';
-    s.top        = '0';
-    s.left       = '0';
-    s.width      = '100%';
-    s.height     = '100%';
-    s.zIndex     = '0';
+    s.position      = 'fixed';
+    s.top           = '0';
+    s.left          = '0';
+    s.width         = '100%';
+    s.height        = '100%';
+    s.zIndex        = '-1';
     s.pointerEvents = 'none';
-    s.display    = 'block';
+    s.display       = 'block';
 
-    // Insert as first child of body
     document.body.insertBefore(canvas, document.body.firstChild);
-
-    // Lift all other body children above the canvas so content stays on top
-    var st = document.createElement('style');
-    st.textContent = 'body > *:not(#spray-paint-canvas){position:relative;z-index:1;}';
-    document.head.appendChild(st);
 
     ctx = canvas.getContext('2d');
     resize();
@@ -77,7 +85,6 @@
     document.addEventListener('mousedown', onDown,  { capture: true });
     document.addEventListener('mouseup',   onUp,    { capture: true });
     document.addEventListener('mousemove', onMove,  { capture: true });
-
     document.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
     document.addEventListener('touchend',   onTouchEnd,   { passive: true, capture: true });
     document.addEventListener('touchmove',  onTouchMove,  { passive: true, capture: true });
@@ -107,9 +114,7 @@
     clearStillTimer();
   }
 
-  function onMove(e) {
-    setPos(e.clientX, e.clientY);
-  }
+  function onMove(e) { setPos(e.clientX, e.clientY); }
 
   function onTouchStart(e) {
     if (!e.touches.length) return;
@@ -141,8 +146,6 @@
     var dx = mouse.x - prevMouse.x;
     var dy = mouse.y - prevMouse.y;
     speed = Math.sqrt(dx * dx + dy * dy);
-
-    // Reset still timer if we've moved meaningfully
     if (speed > 2 && pressing) {
       holdDensity = 0;
       clearStillTimer();
@@ -150,69 +153,48 @@
     }
   }
 
-  // ─── Still / drip scheduling ───────────────────────────────────────────────
+  // ─── Drip scheduling ───────────────────────────────────────────────────────
   function scheduleStillCheck() {
     clearStillTimer();
     stillSince = Date.now();
     stillTimer = setTimeout(function () {
-      if (pressing && dripsThisHold < CFG.maxDrips) {
-        spawnDrip();
-      }
+      if (pressing && dripsThisHold < CFG.maxDrips) spawnDrip();
     }, CFG.dripDelay);
   }
 
   function clearStillTimer() {
-    if (stillTimer !== null) {
-      clearTimeout(stillTimer);
-      stillTimer = null;
-    }
+    if (stillTimer !== null) { clearTimeout(stillTimer); stillTimer = null; }
     stillSince = null;
   }
 
-  // ─── Spawn a drip ──────────────────────────────────────────────────────────
   function spawnDrip() {
     dripsThisHold++;
-    var offsetX = (Math.random() - 0.5) * CFG.baseRadius * 0.6;
     drips.push({
-      x:    mouse.x + offsetX,
-      y:    mouse.y,
-      vy:   CFG.dripGravity,
-      vx:   (Math.random() - 0.5) * 0.4,
-      len:  0,
+      x: mouse.x + (Math.random() - 0.5) * CFG.baseRadius * 0.6,
+      y: mouse.y,
+      vy: CFG.dripGravity,
+      vx: (Math.random() - 0.5) * 0.4,
+      len: 0,
       maxLen: CFG.dripMaxLen * (0.5 + Math.random() * 0.5),
-      segments: [],        // [{x,y}] path history
+      segments: [],
       alive: true,
     });
-
-    // Schedule another drip if still holding and quota remains
     if (dripsThisHold < CFG.maxDrips) {
       stillTimer = setTimeout(function () {
-        if (pressing && dripsThisHold < CFG.maxDrips) {
-          spawnDrip();
-        }
+        if (pressing && dripsThisHold < CFG.maxDrips) spawnDrip();
       }, CFG.dripDelay * 0.7);
     }
   }
 
-  // ─── Emit spray particles ──────────────────────────────────────────────────
+  // ─── Particles ─────────────────────────────────────────────────────────────
   function emitParticles() {
     if (!pressing) return;
-
-    // Density buildup when slow / still
-    if (speed < 2) {
-      holdDensity = Math.min(1, holdDensity + 0.018);
-    } else {
-      holdDensity = Math.max(0, holdDensity - 0.04);
-    }
-
-    var count = Math.round(
-      CFG.baseRate + holdDensity * (CFG.maxRate - CFG.baseRate)
-    );
-    var spreadBoost = speed * CFG.speedSpread;
-    var radius = CFG.baseRadius + spreadBoost;
-
+    holdDensity = speed < 2
+      ? Math.min(1, holdDensity + 0.018)
+      : Math.max(0, holdDensity - 0.04);
+    var count  = Math.round(CFG.baseRate + holdDensity * (CFG.maxRate - CFG.baseRate));
+    var radius = CFG.baseRadius + speed * CFG.speedSpread;
     for (var i = 0; i < count; i++) {
-      // Gaussian-ish distribution: pick point in disk weighted toward centre
       var angle = Math.random() * Math.PI * 2;
       var dist  = Math.pow(Math.random(), 0.65) * radius;
       particles.push({
@@ -224,56 +206,43 @@
     }
   }
 
-  // ─── Update drips ─────────────────────────────────────────────────────────
+  // ─── Drip physics ──────────────────────────────────────────────────────────
   function updateDrips() {
     for (var i = drips.length - 1; i >= 0; i--) {
       var d = drips[i];
       if (!d.alive) { drips.splice(i, 1); continue; }
-
       d.segments.push({ x: d.x, y: d.y });
       d.vx += (Math.random() - 0.5) * CFG.dripDrift;
       d.vx *= CFG.dripFriction;
-      d.vy += CFG.dripGravity * 0.05;   // gentle acceleration
+      d.vy += CFG.dripGravity * 0.05;
       d.vy *= CFG.dripFriction;
       d.x  += d.vx;
       d.y  += d.vy;
       d.len++;
-
-      if (d.len >= d.maxLen || d.y > H + 20) {
-        d.alive = false;
-      }
+      if (d.len >= d.maxLen || d.y > H + 20) d.alive = false;
     }
   }
 
-  // ─── Draw everything ───────────────────────────────────────────────────────
+  // ─── Draw ──────────────────────────────────────────────────────────────────
   function draw() {
-    // Particles are persistent — we draw them incrementally each frame
-    // by only drawing the newest batch. The canvas is never cleared.
-
-    // Draw new particles emitted this frame
     for (var i = 0; i < particles.length; i++) {
       var p = particles[i];
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = hexToRgba(CFG.color, p.a);
+      ctx.fillStyle = rgba(p.a);
       ctx.fill();
     }
-    particles = [];   // clear buffer — dots are now painted onto canvas
+    particles = [];
 
-    // Draw drip paths
     for (var j = 0; j < drips.length; j++) {
       var d = drips[j];
       if (d.segments.length < 2) continue;
       ctx.beginPath();
       ctx.moveTo(d.segments[0].x, d.segments[0].y);
-      for (var k = 1; k < d.segments.length; k++) {
+      for (var k = 1; k < d.segments.length; k++)
         ctx.lineTo(d.segments[k].x, d.segments[k].y);
-      }
-      // Fade out near end
-      var fadeAlpha = d.alive
-        ? CFG.dripAlpha
-        : CFG.dripAlpha * (1 - d.len / d.maxLen);
-      ctx.strokeStyle = hexToRgba(CFG.color, Math.max(0, fadeAlpha));
+      var fa = d.alive ? CFG.dripAlpha : CFG.dripAlpha * (1 - d.len / d.maxLen);
+      ctx.strokeStyle = rgba(Math.max(0, fa));
       ctx.lineWidth   = CFG.dripWidth * (0.6 + 0.4 * (1 - d.len / d.maxLen));
       ctx.lineCap     = 'round';
       ctx.lineJoin    = 'round';
@@ -281,20 +250,15 @@
     }
   }
 
-  // ─── Main loop ─────────────────────────────────────────────────────────────
   function loop() {
     emitParticles();
     updateDrips();
     draw();
-    raf = requestAnimationFrame(loop);
+    requestAnimationFrame(loop);
   }
 
-  // ─── Utilities ─────────────────────────────────────────────────────────────
-  function hexToRgba(hex, alpha) {
-    var r = parseInt(hex.slice(1, 3), 16);
-    var g = parseInt(hex.slice(3, 5), 16);
-    var b = parseInt(hex.slice(5, 7), 16);
-    return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha.toFixed(3) + ')';
+  function rgba(a) {
+    return 'rgba(87,76,255,' + a.toFixed(3) + ')';
   }
 
   // ─── Boot ──────────────────────────────────────────────────────────────────
