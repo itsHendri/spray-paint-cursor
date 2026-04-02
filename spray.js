@@ -13,15 +13,13 @@
     speedSpread:      0.4,
     minAlpha:         0.55,
     maxAlpha:         0.95,
-    dripGravity:      0.032,  // slow pull — paint flows, doesn't race
-    dripDrift:        0.012,  // slight organic sideways wobble
-    dripFriction:     0.90,   // strong damping → low terminal velocity
-    dripMaxLen:       90,     // short drips, stops well before screen edge
-    dripHeadWidth:    14,     // thick at the pooling head
-    dripTailWidth:    2.5,    // thins to a fine tail
-    dripAlpha:        0.90,
-    dripStickChance:  0.07,   // prob/frame of surface-tension hesitation
-    dripStickDamp:    0.15,   // how hard the stutter brakes the drip
+    dripGravity:      0.14,   // original clean gravity flow
+    dripDrift:        0.008,
+    dripFriction:     0.980,
+    dripMaxLen:       75,     // short — drips stop well before bottom
+    dripHeadWidth:    14,
+    dripTailWidth:    2,
+    dripAlpha:        0.88,
   };
 
   // Alternating colours: #383BFE (blue) and #EF2006 (red)
@@ -246,7 +244,7 @@
       vy: 0,   // starts stationary — gravity builds flow naturally
       vx: 0,
       len: 0,
-      maxLen: CFG.dripMaxLen * (0.6 + Math.random() * 0.4),
+      maxLen: CFG.dripMaxLen * (0.25 + Math.random() * 0.75), // wide variance = inconsistent lengths
       segments: [],
       alive: true,
       colorIdx: colorIdx,
@@ -280,53 +278,17 @@
   }
 
   // ─── Drip physics ──────────────────────────────────────────────────────────
-  // Satellite blobs: small drops that detach when a drip ends
-  var satellites = [];
-
   function updateDrips() {
     for (var i = drips.length - 1; i >= 0; i--) {
       var d = drips[i];
-      if (!d.alive) {
-        // Spawn 1–2 satellite drops at the tip
-        var nSat = 1 + Math.floor(Math.random() * 2);
-        for (var s = 0; s < nSat; s++) {
-          satellites.push({
-            x:  d.x + (Math.random() - 0.5) * 4,
-            y:  d.y + Math.random() * 6,
-            vy: 0.3 + Math.random() * 0.5,
-            r:  2 + Math.random() * 3,
-            life: 1.0,
-            ci: d.colorIdx,
-          });
-        }
-        drips.splice(i, 1);
-        continue;
-      }
-
+      if (!d.alive) { drips.splice(i, 1); continue; }
       d.segments.push({ x: d.x, y: d.y });
-
-      // Surface-tension stutter: occasionally the drip hesitates then flows
-      if (Math.random() < CFG.dripStickChance) {
-        d.vy *= CFG.dripStickDamp;
-      } else {
-        d.vy = (d.vy + CFG.dripGravity) * CFG.dripFriction;
-      }
+      d.vy = (d.vy + CFG.dripGravity) * CFG.dripFriction;
       d.vx = (d.vx + (Math.random() - 0.5) * CFG.dripDrift) * CFG.dripFriction;
-
       d.x  += d.vx;
       d.y  += d.vy;
       d.len++;
       if (d.len >= d.maxLen || d.y > H + 20) d.alive = false;
-    }
-
-    // Update satellites
-    for (var j = satellites.length - 1; j >= 0; j--) {
-      var sat = satellites[j];
-      sat.y   += sat.vy;
-      sat.vy  += 0.04;          // tiny gravity on the drop
-      sat.vy  *= 0.96;
-      sat.life -= 0.018;
-      if (sat.life <= 0) { satellites.splice(j, 1); }
     }
   }
 
@@ -361,26 +323,15 @@
         ctx.stroke();
       }
 
-      // Round bead at the live tip — prominent at start, shrinks as drip extends
+      // Round bead at the live tip — shrinks as drip extends
       if (d.alive && n > 1) {
         var progress = n / d.maxLen;
-        // Bead grows for first 15% of life, then slowly shrinks
-        var beadGrow = progress < 0.15 ? progress / 0.15 : 1 - (progress - 0.15) * 0.6;
-        var beadR = CFG.dripHeadWidth * 0.75 * Math.max(0.25, beadGrow);
+        var beadR = CFG.dripHeadWidth * 0.55 * (1 - progress * 0.5);
         ctx.beginPath();
         ctx.arc(d.x, d.y, Math.max(1, beadR), 0, Math.PI * 2);
         ctx.fillStyle = rgba(CFG.dripAlpha, d.colorIdx);
         ctx.fill();
       }
-    }
-
-    // Draw satellite drops
-    for (var s = 0; s < satellites.length; s++) {
-      var sat = satellites[s];
-      ctx.beginPath();
-      ctx.arc(sat.x, sat.y, sat.r, 0, Math.PI * 2);
-      ctx.fillStyle = rgba(sat.life * CFG.dripAlpha, sat.ci);
-      ctx.fill();
     }
   }
 
